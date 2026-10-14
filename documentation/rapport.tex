@@ -1,0 +1,358 @@
+% Springer LNCS — rapport projet 4A Facteurs Humains
+% Compiler : pdflatex rapport.tex (nécessite llncs.cls disponible sur springer.com)
+\documentclass[runningheads]{llncs}
+
+\usepackage[french]{babel}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{amsmath}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  backgroundcolor=\color{gray!10}
+}
+
+\begin{document}
+
+\title{Mini-Golf Adaptatif par Biofeedback Physiologique\\
+\large Mesure et induction du \textit{flow} en temps réel}
+
+\author{[Transon Paul]\inst{1} \and
+        [Hamdy Maya]\inst{1} \and
+        [Lefebvre Eric]\inst{1}}
+
+\authorrunning{Transon et al.}
+
+\institute{[Ensim], [Le Mans], France\\}
+
+
+\maketitle
+
+% ──────────────────────────────────────────────────────────────────────
+\begin{abstract}
+Nous présentons un système de biofeedback temps réel intégrant une carte
+de capteurs physiologiques BITalino avec un jeu de mini-golf développé
+sous Unity. Quatre capteurs (électromyogramme, capteur photopléthysmographique,
+activité électrodermale, ceinture respiratoire) transmettent leurs données
+à un pipeline Python qui calcule un score de stress individualisé. Ce score
+adapte dynamiquement la difficulté du jeu pour maintenir le joueur dans un
+état de \textit{flow} (concentration optimale). Une calibration personnalisée
+de 30 secondes garantit la normalisation inter-individuelle des signaux.
+\keywords{biofeedback \and flow \and capteurs physiologiques \and jeu adaptatif
+\and BITalino \and HRV \and EDA}
+\end{abstract}
+
+% ──────────────────────────────────────────────────────────────────────
+\section{Introduction}
+
+Les interfaces homme-machine adaptatives constituent un axe de recherche
+actif en facteurs humains : adapter en temps réel la charge de travail d'un
+système à l'état interne de l'utilisateur requiert des mesures objectives et
+continues de cet état. Les signaux physiologiques — fréquence cardiaque (FC),
+variabilité cardiaque (HRV), activité électrodermale (EDA) et respiration —
+offrent une fenêtre directe sur le système nerveux autonome, reflet de
+l'arousal et du stress~\cite{healey2005}.
+
+Dans ce contexte, nous proposons un jeu de mini-golf dont l'environnement
+(vent, contraintes temporelles, effets visuels) s'adapte automatiquement à
+l'état physiologique du joueur. L'objectif sous-jacent est double : induire
+un état de \textit{flow}~\cite{csikszentmihalyi1990} chez le joueur, et
+démontrer la faisabilité d'une mesure physiologique en temps réel à faible
+coût dans un contexte ludique.
+
+Le système repose sur une carte BITalino Core BT, un pipeline de traitement
+du signal en Python, et un jeu Unity communiquant via WebSocket local.
+L'ensemble fonctionne en autonomie complète, sans service distant.
+
+% ──────────────────────────────────────────────────────────────────────
+\section{Motivation}
+
+\subsection{Théorie du \textit{flow}}
+
+Le concept de \textit{flow} (Csikszentmihalyi, 1990~\cite{csikszentmihalyi1990})
+décrit un état de concentration optimale caractérisé par l'absorption totale
+dans une tâche, l'automaticité des actions et une distorsion du temps. Trois
+préconditions sont nécessaires pour l'induire :
+
+\begin{enumerate}
+  \item \textbf{Challenge-Skill Balance} : la difficulté de la tâche doit correspondre au niveau de compétence du sujet — ni trop facile (ennui), ni trop difficile (anxiété).
+  \item \textbf{Clear Goals} : des objectifs clairs à chaque instant maintiennent l'engagement attentionnel.
+  \item \textbf{Unambiguous Feedback} : un retour immédiat sur la réussite alimente la boucle d'engagement.
+\end{enumerate}
+
+Ces trois conditions ont guidé le design du jeu : l'objectif (mettre la balle
+dans le trou) est toujours visible, le jeu réagit visuellement à chaque action,
+et la difficulté s'adapte au score de stress mesuré.
+
+\subsection{Corrélats physiologiques du \textit{flow}}
+
+La littérature identifie une signature physiologique distincte pour trois états :
+ennui, \textit{flow} et stress (Tableau~\ref{tab:physiologie}).
+L'EDA mesure l'arousal sympathique\footnote{Activation du système nerveux
+sympathique, associée à l'éveil et à la réponse au stress.} via la conductance
+cutanée~\cite{shi2007} : en état de stress, des réponses électrodermales
+(SCR\footnote{Skin Conductance Response — pics transitoires de conductance
+lors d'un stimulus stressant.}) s'ajoutent au niveau tonique de base.
+La HRV, et particulièrement le RMSSD\footnote{Root Mean Square of Successive
+Differences — racine carrée des différences successives entre intervalles R-R,
+reflet de l'activité parasympathique.}, est corrélée à la demande
+cognitive~\cite{luft2009} et à l'engagement optimal. Le tremblement
+résiduel mesuré par accéléromètre constitue un quatrième corrélat : en état
+de \textit{flow}, la motricité est stable et contrôlée, tandis que le stress
+se manifeste par une agitation accrue~\cite{racz2025}. Le dataset
+WESAD~\cite{wesad2018} a validé une formule de stress multimodale dont
+nous nous sommes inspirés. L'EMG, en revanche, n'est pas un indicateur
+de \textit{flow} dans notre système : il sert uniquement de mécanisme
+d'interaction (déclenchement du tir par relâchement musculaire).
+
+\begin{table}[h]
+\centering
+\caption{Signature physiologique des trois états cibles}
+\label{tab:physiologie}
+\begin{tabular}{lccc}
+\hline
+Capteur & Ennui & Flow & Stress \\
+\hline
+EDA (SCL)         & bas      & modéré, stable  & élevé + SCR \\
+FC                & basse    & intermédiaire   & élevée \\
+HRV (RMSSD)       & élevée   & stable          & basse \\
+ACC (tremblement) & variable & faible, stable  & élevé \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection{Justification du mini-golf}
+
+Le golf présente des propriétés favorables à l'induction du \textit{flow} :
+précision gestuelle requise, objectif unique clair, et geste biomécanique
+mesurable par EMG. Rácz et al.~\cite{racz2025} confirment que les sujets en
+état de \textit{flow} sont significativement moins actifs physiquement — ce
+qui rend le tremblement résiduel mesuré par accéléromètre d'autant plus
+informatif.
+
+% ──────────────────────────────────────────────────────────────────────
+\section{Description Technique du Système}
+
+\subsection{Architecture générale}
+
+Le système comprend trois composantes principales (Fig.~\ref{fig:architecture}) :
+(1) la couche d'acquisition matérielle (BITalino), (2) le pipeline Python de
+traitement du signal, et (3) le jeu Unity.
+
+\begin{figure}[h]
+\centering
+% Remplacer par une vraie figure si disponible
+\fbox{\parbox{0.85\textwidth}{\centering
+\texttt{[BITalino BT]} $\rightarrow$ \texttt{acquisition.py} $\rightarrow$
+\texttt{signal\_processor.py} $\rightarrow$ \texttt{websocket\_bridge.py}
+$\rightarrow$ \texttt{[Unity ws://localhost:8765]}
+}}
+\caption{Architecture du pipeline de données}
+\label{fig:architecture}
+\end{figure}
+
+\subsection{Capteurs et mapping}
+
+La carte BITalino Core BT est utilisée avec quatre capteurs analogiques
+à 100 Hz, résolution 16 bits :
+
+\begin{itemize}
+  \item \textbf{RESP} (ceinture respiratoire) : fréquence et amplitude respiratoires
+  \item \textbf{PPG} (capteur photopléthysmographique) : fréquence cardiaque et HRV
+  \item \textbf{EDA} (électrodes cutanées, 2 leads) : conductance cutanée
+  \item \textbf{EMG} (électrodes musculaires, 3 leads) : déclenchement du tir
+  \item \textbf{ACC} (accéléromètre 2 axes) : micro-tremblements pendant la visée
+\end{itemize}
+
+\subsection{Pipeline de traitement du signal}
+
+\paragraph{Calibration individuelle (30 secondes).}
+Avant chaque partie, le joueur reste au repos pendant 30 secondes. Le système
+enregistre ses valeurs de référence personnelles : fréquence cardiaque, variabilité
+cardiaque, fréquence respiratoire, niveau de conductance cutanée, et activité
+musculaire minimale. Ces références individuelles servent ensuite à normaliser
+toute l'analyse — deux joueurs avec des physiologies différentes obtiendront
+un score de stress comparable.
+
+\paragraph{Détection de pics (PPG et RESP).}
+Pour mesurer la fréquence cardiaque et la respiration, l'algorithme repère les
+pics du signal sur une fenêtre glissante. Le seuil de détection s'adapte
+automatiquement à l'amplitude réelle du signal, ce qui le rend robuste aux
+artefacts de mouvement. Une période d'insensibilité après chaque pic (0,35~s
+pour le PPG, 2,0~s pour la respiration) évite de compter deux fois le même
+battement. La variabilité cardiaque (HRV) est calculée à partir des 20 derniers
+intervalles entre battements.
+
+\paragraph{Score de stress composite.}
+Le score de stress combine quatre mesures, chacune normalisée par rapport à la
+baseline individuelle~\cite{wesad2018} :
+
+\begin{equation}
+\text{stress} = 0.35 \cdot s_{HR} + 0.30 \cdot s_{HRV} + 0.20 \cdot s_{EDA} + 0.15 \cdot s_{RESP}
+\label{eq:stress}
+\end{equation}
+
+La fréquence cardiaque et la HRV ont le plus grand poids car ce sont les
+indicateurs les plus fiables du stress. L'EDA et la respiration complètent
+le tableau. Chaque composante vaut 0 au repos et augmente quand le joueur
+s'écarte de sa propre baseline.
+
+\paragraph{Déclenchement du tir (EMG).}
+Le tir est détecté par relâchement musculaire : le joueur contracte le muscle
+(signal EMG au-dessus du seuil calibré), puis relâche. C'est le moment du
+relâchement qui envoie le signal \texttt{shot\_triggered} à Unity —
+reproduisant la mécanique naturelle d'un tir de golf.
+
+\subsection{Communication WebSocket}
+
+Un serveur WebSocket asyncio (bibliothèque \texttt{websockets}) tourne
+dans un thread dédié et émet trois types de messages JSON vers Unity :
+\texttt{calibration\_progress} (1/s pendant 30~s),
+\texttt{calibration\_complete} (une fois), et \texttt{data} (10~Hz,
+avec bypass immédiat pour \texttt{shot\_triggered}).
+
+\subsection{Jeu Unity}
+
+Le jeu de mini-golf comporte deux scènes : un écran de calibration avec
+barre de progression, et le jeu principal. La difficulté s'adapte en
+continu via le champ \texttt{stress} :
+
+\begin{itemize}
+  \item Vitesse du vent : proportionnelle à \texttt{stress}
+  \item Tremblement de la balle : piloté par l'accéléromètre, amplifié si \texttt{stress} $>$ 0.5
+  \item Contrainte temporelle : récapitulatif finale avec temps et nombre de coups\texttt{stress}
+\end{itemize}
+
+Les transitions sont lissées avec un \texttt{Lerp} sur 3--5~s pour éviter
+les changements brusques.
+
+% ──────────────────────────────────────────────────────────────────────
+\section{Développement}
+
+\subsection{Organisation et gestion du projet}
+
+L'équipe de trois personnes a travaillé selon une répartition des rôles
+claire : un membre a développé le jeu Unity, un autre a développé le pipeline Python d'acquisition et de traitement du signal, et le dernier s'est occupé de s'assuré que tout fonctionnait en aidant là où le besoin se faisait.
+La communication entre les deux sous-systèmes a été définie en amont via
+un contrat d'interface (format des messages WebSocket JSON), permettant
+un développement en parallèle.
+
+Le développement s'est déroulé en quatre phases successives :
+(1) validation de l'acquisition brute BITalino, (2) développement du
+traitement du signal, (3) intégration WebSocket, (4) développement Unity
+et tests d'intégration. Cette approche incrémentale a permis d'isoler
+les bugs à chaque étape avant de passer à la suivante.
+
+Un obstacle majeur a été rencontré dès le début : l'un des membres ne
+pouvait pas coupler la carte BITalino sur sa machine (problème de
+compatibilité Bluetooth). La solution adoptée a été de séparer
+développement (en aveugle, sur une machine sans capteur) et test
+(sur la machine fonctionnelle du collègue), en synchronisant via Git.
+
+\subsection{Développement assisté par IA}
+
+Ce projet a été développé en co-développement humain-IA avec Claude Code
+(Anthropic, modèle Sonnet 4.6). L'IA a été utilisée de façon intensive
+pour la conception et l'implémentation du pipeline Python.
+
+\paragraph{Apports concrets de l'IA.}
+L'IA a contribué à : la conception de l'architecture multi-thread
+(\texttt{threading} Python + asyncio WebSocket + boucle matplotlib) ;
+l'implémentation des algorithmes de détection de pics adaptatifs (seuil
+médiane + percentile) ; la formule de stress normalisée par baseline
+individuelle ; le débogage du bug de filtrage WebSocket (valeurs
+\texttt{heart\_rate} bloquées aux valeurs par défaut à cause d'un double
+filtrage) ; et la documentation technique complète (\texttt{CLAUDE.md}). L'IA a également était utilisé dans la création du plan, et dans la reformulation du rapport.
+
+\paragraph{Limites et supervision humaine.}
+L'IA ne pouvait pas tester le code sur le matériel réel. Chaque proposition
+a nécessité une validation expérimentale par le membre de l'équipe disposant
+de la carte BITalino. Plusieurs paramètres (seuil EMG, multiplicateur de
+détection de pics) ont dû être ajustés empiriquement après test sur signaux
+réels. L'IA a également dû être recadrée lorsqu'elle proposait des
+abstractions prématurées ou des fonctionnalités hors-scope.
+
+\paragraph{Réflexion sur la pratique.}
+Le co-développement avec IA a significativement accéléré le développement
+du pipeline de traitement du signal (estimé à 3 fois plus rapide qu'en
+développement solo). En revanche, il a parfois créé une dépendance au
+code généré sans compréhension profonde des paramètres, ce qui s'est
+révélé problématique lors du débogage de la détection de pics PPG/RESP.
+La pratique de relecture systématique de chaque suggestion avant
+implémentation s'est avérée indispensable.
+
+\subsection{Défis techniques rencontrés}
+
+\paragraph{Signal EDA : problème résolu en cours de projet.}
+En début de projet, le capteur EDA produisait des valeurs totalement inutilisables
+(signal constant ou bruit pur) en raison d'un mauvais contact électrode-peau. Après
+ajustement du placement des électrodes, le signal est devenu pleinement exploitable.
+La faible résolution brute (valeurs entre 27 et 31 sur 65535 au repos) a été traitée
+par comparaison de la plage percentile P90-P10 sur fenêtre glissante de 10~s, et les
+valeurs aberrantes ponctuelles filtrées par écrêtage. Le capteur EDA fonctionne
+de manière satisfaisante dans la version finale du système.
+
+\paragraph{Tremblement par accéléromètre.}
+L'accéléromètre mesure les micro-tremblements du joueur pendant la phase de visée.
+Ces données sont transmises à Unity pour animer visuellement le tremblement de
+la balle avant le tir : plus le joueur est instable, plus la balle tremble à
+l'écran. Cet effet crée un lien perceptible et immédiat entre l'état physique
+du joueur et le rendu visuel du jeu, renforçant la cohérence du biofeedback.
+
+\paragraph{Threading et synchronisation.}
+La coexistence de trois threads (matplotlib principal, acquisition PLUX,
+WebSocket asyncio) a nécessité une gestion fine de la synchronisation.
+Un bug d'arrêt (crash Tkinter au Ctrl+C) a été corrigé en remplaçant
+le \texttt{try/except KeyboardInterrupt} par un \texttt{signal.signal(SIGINT)}
+positionnant un \texttt{threading.Event}, permettant un arrêt propre.
+
+% ──────────────────────────────────────────────────────────────────────
+\section{Conclusion}
+
+\subsection{Bilan positif}
+
+Le système développé atteint son objectif principal : une chaîne complète
+et fonctionnelle allant de la mesure physiologique brute à l'adaptation
+temps réel du jeu. Les éléments qui fonctionnent de manière satisfaisante
+sont : la détection EMG du tir (fiable après calibration individuelle) ;
+la mesure de fréquence cardiaque via PPG (précision suffisante pour le
+score de stress) ; la communication WebSocket Python-Unity (latence
+<100~ms, 10~Hz stables) ; et la calibration individuelle qui rend le
+score de stress robuste aux variations inter-sujets.
+
+La formule de stress (Eq.~\ref{eq:stress}), inspirée de WESAD et normalisée
+par baseline individuelle, constitue une contribution méthodologique
+solide : elle ne suppose aucune valeur de référence universelle et
+s'adapte à chaque joueur en 30 secondes.
+
+\subsection{Limites et points négatifs}
+
+La principale limitation n’est pas technique mais contextuelle : dans un jeu casual sans enjeu réel, les variations physiologiques restent faibles. Des études comme Healey et Picard~\cite{healey2005} obtiennent des signaux EDA significatifs dans des contextes à fort enjeu (conduite automobile). À l’inverse, un mini-golf joué seul ne génère pas le même niveau de réponse sympathique, ce qui réduit la dynamique des capteurs et donc la sensibilité du score de stress. Toutefois, l’ajout de conditions extérieures au jeu, comme des défis entre participants ou la présence d’un public, pourrait permettre de renforcer les réactions physiologiques et ainsi de limiter ce problème.
+
+La fluidité du jeu pourrait également être légèrement améliorée.
+
+\subsection{Perspectives}
+
+Plusieurs axes d'amélioration sont identifiés. Sur le plan des capteurs :
+un ECG remplacerait avantageusement le PPG pour une HRV plus précise ;
+un EEG grand public (type Muse) mesurerait directement la charge cognitive
+préfrontale. Sur le plan du protocole : une validation avec le Flow Short
+Scale~\cite{engeser2008} et une condition contrôlée de stress induit
+(tâche de calcul mental) permettrait de valider les mesures. Sur le plan
+du jeu : affiner l'algorithme de tremblement accéléromètre (lissage temporel,
+normalisation par amplitude de baseline) améliorerait la fidélité du
+biofeedback sensorimoteur, facteur clé de l'engagement dans le \textit{flow}.
+
+Il aurait également été envisageable de développer le jeu en réalité virtuelle afin d’augmenter l’immersion du joueur et potentiellement obtenir des réactions physiologiques plus marquées, conduisant ainsi à des résultats plus pertinents.
+
+% ──────────────────────────────────────────────────────────────────────
+\bibliographystyle{splncs04}
+\bibliography{references}
+
+\end{document}
